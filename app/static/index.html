@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keitaro wrapper</title>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --line:#e2e5ea; --text:#1d2330; --muted:#6b7280; --accent:#2f9e44; --danger:#d6336c; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--text); }
+  header { background:#25282e; color:#fff; padding:14px 24px; display:flex; align-items:center; gap:24px; }
+  header h1 { font-size:18px; margin:0; font-weight:600; }
+  header h1 span { color:#51cf66; }
+  nav button { background:none; border:0; color:#aab; font:inherit; padding:6px 12px; cursor:pointer; border-radius:6px; }
+  nav button.active { background:#3a3f48; color:#fff; }
+  main { max-width:1000px; margin:24px auto; padding:0 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:20px; margin-bottom:16px; }
+  h2 { margin:0 0 14px; font-size:16px; }
+  label { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
+  input, select { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:6px; font:inherit; background:#fff; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; }
+  button.btn { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:9px 16px; font:inherit; cursor:pointer; }
+  button.btn:disabled { opacity:.5; cursor:wait; }
+  button.btn.ghost { background:#fff; color:var(--text); border:1px solid var(--line); }
+  button.btn.danger { background:#fff; color:var(--danger); border:1px solid var(--danger); padding:4px 10px; }
+  .row { display:flex; gap:10px; align-items:flex-end; }
+  .row > * { flex:1; }
+  .row > button { flex:none; }
+  .msg { margin-top:12px; padding:10px 12px; border-radius:6px; display:none; }
+  .msg.ok { display:block; background:#ebfbee; color:#237a35; }
+  .msg.err { display:block; background:#fff0f6; color:#a61e4d; }
+  table { width:100%; border-collapse:collapse; margin-top:8px; }
+  th, td { text-align:right; padding:7px 8px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th:first-child, td:first-child { text-align:left; white-space:normal; }
+  th { font-size:12px; color:var(--muted); font-weight:500; }
+  tfoot td { font-weight:600; border-bottom:0; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:10px; background:#e7f5ff; color:#1971c2; font-size:12px; }
+  .pill.warn { background:#fff4e6; color:#d9480f; }
+  .stream-title { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+  .muted { color:var(--muted); }
+  .hidden { display:none; }
+  .meta { display:flex; gap:18px; flex-wrap:wrap; color:var(--muted); margin-bottom:6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Keitaro <span>wrapper</span></h1>
+  <nav>
+    <button id="tab-create" class="active">Создать кампанию</button>
+    <button id="tab-edit">Редактор кампании</button>
+  </nav>
+</header>
+<main>
+  <section id="view-create">
+    <div class="card">
+      <h2>Новая кампания</h2>
+      <form id="create-form">
+        <div class="grid">
+          <div><label>Название</label><input id="c-name" required placeholder="campaign1"><div class="muted" id="prefix-hint"></div></div>
+          <div><label>Гео (код страны)</label><input id="c-geo" required maxlength="2" placeholder="JP"></div>
+          <div><label>Оффер</label>
+            <input id="c-offer" list="offers-list" required placeholder="ID оффера">
+            <datalist id="offers-list"></datalist>
+          </div>
+        </div>
+        <div class="grid" style="margin-top:14px">
+          <div><label>Домен</label><select id="c-domain"></select></div>
+          <div><label>Группа</label><select id="c-group"></select></div>
+          <div><label>Источник</label><select id="c-source"></select></div>
+        </div>
+        <p class="muted">Будет создано два потока: <b>1)</b> все из выбранной страны - на google.com, <b>2)</b> выбранный оффер (100%).</p>
+        <button class="btn" id="c-submit">Создать</button>
+        <div class="msg" id="c-msg"></div>
+      </form>
+    </div>
+  </section>
+
+  <section id="view-edit" class="hidden">
+    <div class="card">
+      <h2>Кампания</h2>
+      <div class="row">
+        <div><label>Поиск по названию или ID</label><input id="e-search" placeholder="test_gorbachev_"></div>
+        <div><label>Кампания</label><select id="e-select"></select></div>
+        <button class="btn ghost" id="e-reload">Обновить</button>
+      </div>
+      <div class="msg" id="e-msg"></div>
+    </div>
+    <div id="e-body"></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const fmt = (n) => (Math.round((Number(n) || 0) * 100) / 100).toLocaleString('ru-RU');
+let META = null;
+let currentId = null;
+
+async function api(method, url, body) {
+  const res = await fetch(url, {
+    method, headers: body ? { 'Content-Type': 'application/json' } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const d = data.detail;
+    throw new Error(Array.isArray(d) ? d.map((x) => x.msg).join('; ') : d || res.statusText);
+  }
+  return data;
+}
+
+function show(el, text, kind) { el.className = 'msg ' + kind; el.textContent = text; }
+function hide(el) { el.className = 'msg'; el.textContent = ''; }
+
+function fillSelect(sel, items, selected) {
+  sel.innerHTML = '';
+  items.forEach((i) => {
+    const o = document.createElement('option');
+    o.value = i.id; o.textContent = `${i.name} (#${i.id})`;
+    if (i.id === selected) o.selected = true;
+    sel.appendChild(o);
+  });
+}
+
+function setTab(name) {
+  $('view-create').classList.toggle('hidden', name !== 'create');
+  $('view-edit').classList.toggle('hidden', name !== 'edit');
+  $('tab-create').classList.toggle('active', name === 'create');
+  $('tab-edit').classList.toggle('active', name === 'edit');
+  if (name === 'edit') loadCampaigns();
+}
+$('tab-create').onclick = () => setTab('create');
+$('tab-edit').onclick = () => setTab('edit');
+
+async function init() {
+  try {
+    META = await api('GET', '/api/meta');
+  } catch (e) { show($('c-msg'), 'Не удалось загрузить справочники: ' + e.message, 'err'); return; }
+  fillSelect($('c-domain'), META.domains, META.defaults.domain_id);
+  fillSelect($('c-group'), META.groups, META.defaults.group_id);
+  fillSelect($('c-source'), META.sources, META.defaults.traffic_source_id);
+  $('offers-list').innerHTML = META.offers.map((o) => `<option value="${o.id}">${o.name}</option>`).join('');
+  $('prefix-hint').textContent = META.prefix ? `Префикс ${META.prefix} добавится автоматически` : '';
+}
+
+$('create-form').onsubmit = async (ev) => {
+  ev.preventDefault();
+  const btn = $('c-submit'); btn.disabled = true; hide($('c-msg'));
+  try {
+    const r = await api('POST', '/api/campaigns', {
+      name: $('c-name').value, geo: $('c-geo').value, offer_id: parseInt($('c-offer').value, 10) || 0,
+      domain_id: +$('c-domain').value, group_id: +$('c-group').value, traffic_source_id: +$('c-source').value,
+    });
+    show($('c-msg'), `Кампания создана: ${r.name} (#${r.id}). Потоков: ${r.streams.length}.`, 'ok');
+    currentId = r.id;
+  } catch (e) { show($('c-msg'), e.message, 'err'); }
+  btn.disabled = false;
+};
+
+async function loadCampaigns() {
+  try {
+    const list = await api('GET', '/api/campaigns?limit=100&q=' + encodeURIComponent($('e-search').value));
+    fillSelect($('e-select'), list.map((c) => ({ id: c.id, name: c.name })), currentId);
+    if (list.length) {
+      if (!list.some((c) => c.id === currentId)) currentId = list[0].id;
+      $('e-select').value = currentId;
+      await loadCampaign();
+    } else { $('e-body').innerHTML = '<p class="muted">Ничего не найдено</p>'; }
+  } catch (e) { show($('e-msg'), e.message, 'err'); }
+}
+
+let searchTimer;
+$('e-search').oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(loadCampaigns, 350); };
+$('e-select').onchange = () => { currentId = +$('e-select').value; loadCampaign(); };
+$('e-reload').onclick = () => loadCampaign();
+
+async function loadCampaign() {
+  if (!currentId) return;
+  hide($('e-msg'));
+  try { render(await api('GET', '/api/campaigns/' + currentId)); }
+  catch (e) { show($('e-msg'), e.message, 'err'); }
+}
+
+function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+function render(c) {
+  const html = [`<div class="card"><h2>${esc(c.name)} <span class="pill">${esc(c.state)}</span></h2>
+    <div class="meta"><span>ID ${c.id}</span><span>Домен: ${esc(c.domain)}</span><span>Группа: ${esc(c.group)}</span><span>Алиас: ${esc(c.alias)}</span></div></div>`];
+  c.streams.forEach((s) => {
+    const filters = s.filters.map((f) => `${esc(f.name)} ${f.mode === 'accept' ? 'принимать' : 'отклонять'}: ${esc((f.payload || []).join(', '))}`).join('; ');
+    let body = '';
+    if (s.editable) {
+      const rows = s.offers.map((o) => `<tr>
+        <td>${esc(o.name)} <span class="muted">#${o.offer_id}</span></td>
+        <td>${o.share}%</td><td>${fmt(o.stats.clicks)}</td><td>${fmt(o.stats.campaign_unique_clicks)}</td>
+        <td>${fmt(o.stats.conversions)}</td><td>${fmt(o.stats.revenue)}</td><td>${fmt(o.stats.cost)}</td><td>${fmt(o.stats.profit)}</td>
+        <td><button class="btn danger" data-del="${o.offer_id}" data-stream="${s.id}">Удалить</button></td></tr>`).join('');
+      const total = ['clicks', 'campaign_unique_clicks', 'conversions', 'revenue', 'cost', 'profit']
+        .map((k) => `<td>${fmt(s.offers.reduce((a, o) => a + (o.stats[k] || 0), 0))}</td>`).join('');
+      body = `<table><thead><tr><th>Оффер</th><th>Доля</th><th>Клики</th><th>Уник.</th><th>Конв.</th><th>Доход</th><th>Расход</th><th>Профит</th><th></th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="9" class="muted">Офферов нет</td></tr>'}</tbody>
+        <tfoot><tr><td>Итого</td><td>${s.share_total}%</td>${total}<td></td></tr></tfoot></table>
+        <div class="row" style="margin-top:14px"><div><label>Добавить оффер (ID)</label><input list="offers-list" id="add-${s.id}" placeholder="ID оффера"></div>
+        <button class="btn" data-add="${s.id}">Добавить</button></div>
+        <p class="muted">Доли пересчитываются поровну, в сумме всегда 100%.</p>`;
+    } else {
+      body = `<p>Все посетители${filters ? ' (' + filters + ')' : ''} перенаправляются на <b>${esc(s.action_payload)}</b></p>
+        <p class="muted">Клики: ${fmt(s.stats.clicks)}, уникальные: ${fmt(s.stats.campaign_unique_clicks)}</p>`;
+    }
+    html.push(`<div class="card"><div class="stream-title"><h2>${esc(s.name)}</h2><span class="pill ${s.editable ? '' : 'warn'}">${s.editable ? 'офферы' : 'редирект'}</span></div>${body}</div>`);
+  });
+  $('e-body').innerHTML = html.join('');
+  $('e-body').querySelectorAll('[data-add]').forEach((b) => b.onclick = () => change(b, 'POST', +b.dataset.add));
+  $('e-body').querySelectorAll('[data-del]').forEach((b) => b.onclick = () => {
+    if (confirm('Удалить оффер ' + b.dataset.del + ' из потока?')) change(b, 'DELETE', +b.dataset.stream, +b.dataset.del);
+  });
+}
+
+async function change(btn, method, streamId, offerId) {
+  btn.disabled = true; hide($('e-msg'));
+  try {
+    let url = `/api/campaigns/${currentId}/streams/${streamId}/offers`;
+    let body;
+    if (method === 'POST') {
+      const v = parseInt($('add-' + streamId).value, 10);
+      if (!v) throw new Error('Укажите ID оффера');
+      body = { offer_id: v };
+    } else { url += '/' + offerId; }
+    render(await api(method, url, body));
+    show($('e-msg'), method === 'POST' ? 'Оффер добавлен' : 'Оффер удалён', 'ok');
+  } catch (e) { show($('e-msg'), e.message, 'err'); btn.disabled = false; }
+}
+
+init();
+</script>
+</body>
+</html>
